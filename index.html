@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>WebRTC Peer-to-Peer Demo</title>
+  <title>WebRTC Peer-to-Peer with TURN</title>
   <style>
     video {
       width: 45%;
@@ -21,7 +21,7 @@
   </style>
 </head>
 <body>
-  <h2>WebRTC Peer-to-Peer Demo (GitHub Pages)</h2>
+  <h2>WebRTC Peer-to-Peer with TURN (GitHub Pages)</h2>
   <video id="localVideo" autoplay muted playsinline></video>
   <video id="remoteVideo" autoplay playsinline></video>
 
@@ -37,7 +37,16 @@
   <script>
     let localStream;
     let pc;
-    const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+    const config = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:relay1.expressturn.com:3478",
+          username: "ef06cf6c-29a6-11ee-8a88-0242ac120002",
+          credential: "efcbecc8-b43f-4207-8660-e7e4584ab7c1"
+        }
+      ]
+    };
 
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
@@ -51,6 +60,8 @@
     start();
 
     function createPeer() {
+      if (pc) return;
+
       pc = new RTCPeerConnection(config);
 
       localStream.getTracks().forEach(track => {
@@ -66,6 +77,13 @@
           console.log('ICE candidate:', event.candidate);
         }
       };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log("ICE state:", pc.iceConnectionState);
+        if (pc.iceConnectionState === "failed") {
+          console.warn("ICE failed — relay may be required.");
+        }
+      };
     }
 
     async function createOffer() {
@@ -76,8 +94,12 @@
     }
 
     async function createAnswer() {
-      const offer = JSON.parse(sdpBox.value);
       createPeer();
+      const offer = JSON.parse(sdpBox.value);
+      if (pc.signalingState === "stable") {
+        console.warn("Already connected — can't set new offer.");
+        return;
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -86,6 +108,13 @@
 
     async function setRemote() {
       const desc = JSON.parse(sdpBox.value);
+      if (!pc) {
+        createPeer();
+      }
+      if (pc.signalingState !== "have-local-offer") {
+        console.warn("Cannot set remote answer in state:", pc.signalingState);
+        return;
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(desc));
     }
   </script>
