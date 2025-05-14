@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebRTC Peer-to-Peer Demo</title>
+  <style>
+    video {
+      width: 45%;
+      margin: 10px;
+      background: #000;
+    }
+    textarea {
+      width: 90%;
+      height: 100px;
+    }
+    button {
+      margin: 5px;
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h2>WebRTC Peer-to-Peer Demo (GitHub Pages)</h2>
+  <video id="localVideo" autoplay muted playsinline></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <br>
+
+  <button onclick="createOffer()">Create Offer</button>
+  <button onclick="createAnswer()">Create Answer</button>
+  <button onclick="setRemote()">Set Remote Description</button>
+
+  <br><br>
+  <textarea id="sdp" placeholder="Paste offer or answer SDP here..."></textarea>
+
+  <script>
+    let localStream;
+    let pc;
+    const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const sdpBox = document.getElementById('sdp');
+
+    async function start() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+    }
+
+    start();
+
+    function createPeer() {
+      pc = new RTCPeerConnection(config);
+
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+
+      pc.ontrack = event => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      pc.onicecandidate = event => {
+        if (event.candidate) {
+          console.log('ICE candidate:', event.candidate);
+        }
+      };
+    }
+
+    async function createOffer() {
+      createPeer();
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      sdpBox.value = JSON.stringify(offer);
+    }
+
+    async function createAnswer() {
+      const offer = JSON.parse(sdpBox.value);
+      createPeer();
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      sdpBox.value = JSON.stringify(answer);
+    }
+
+    async function setRemote() {
+      const desc = JSON.parse(sdpBox.value);
+      await pc.setRemoteDescription(new RTCSessionDescription(desc));
+    }
+  </script>
+</body>
+</html>
