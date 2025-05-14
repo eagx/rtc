@@ -2,120 +2,71 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>WebRTC Peer-to-Peer with TURN</title>
+  <title>WebRTC with WebSocket Signaling</title>
   <style>
-    video {
-      width: 45%;
-      margin: 10px;
-      background: #000;
-    }
-    textarea {
-      width: 90%;
-      height: 100px;
-    }
-    button {
-      margin: 5px;
-      padding: 10px 20px;
-      font-size: 16px;
-    }
+    video { width: 45%; margin: 10px; background: #000; }
+    button { padding: 10px 20px; margin: 5px; }
   </style>
 </head>
 <body>
-  <h2>WebRTC Peer-to-Peer with TURN (GitHub Pages)</h2>
+  <h2>WebRTC Demo</h2>
   <video id="localVideo" autoplay muted playsinline></video>
   <video id="remoteVideo" autoplay playsinline></video>
-
   <br>
-
-  <button onclick="createOffer()">Create Offer</button>
-  <button onclick="createAnswer()">Create Answer</button>
-  <button onclick="setRemote()">Set Remote Description</button>
-
-  <br><br>
-  <textarea id="sdp" placeholder="Paste offer or answer SDP here..."></textarea>
+  <button onclick="start(true)">Start as Caller</button>
+  <button onclick="start(false)">Start as Callee</button>
 
   <script>
-    let localStream;
-    let pc;
+    let localVideo = document.getElementById('localVideo');
+    let remoteVideo = document.getElementById('remoteVideo');
+    let pc, socket, isCaller;
+
     const config = {
       iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        {
-          urls: "turn:relay1.expressturn.com:3478",
-          username: "ef06cf6c-29a6-11ee-8a88-0242ac120002",
-          credential: "efcbecc8-b43f-4207-8660-e7e4584ab7c1"
-        }
+        { urls: "stun:stun.l.google.com:19302" }
       ]
     };
 
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
-    const sdpBox = document.getElementById('sdp');
-
-    async function start() {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localVideo.srcObject = localStream;
-    }
-
-    start();
-
-    function createPeer() {
-      if (pc) return;
+    async function start(caller) {
+      isCaller = caller;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = stream;
 
       pc = new RTCPeerConnection(config);
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
-
-      pc.ontrack = event => {
-        remoteVideo.srcObject = event.streams[0];
+      pc.ontrack = e => remoteVideo.srcObject = e.streams[0];
+      pc.onicecandidate = e => {
+        if (e.candidate) socket.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
       };
 
-      pc.onicecandidate = event => {
-        if (event.candidate) {
-          console.log('ICE candidate:', event.candidate);
+      socket = new WebSocket("wss://your-signaling-server.glitch.me"); // Replace this with your deployed server URL
+
+      socket.onmessage = async ({ data }) => {
+        const msg = JSON.parse(data);
+        if (msg.type === 'offer' && !isCaller) {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.send(JSON.stringify({ type: 'answer', answer }));
+        } else if (msg.type === 'answer' && isCaller) {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+        } else if (msg.type === 'candidate') {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+          } catch (e) {
+            console.error("Error adding received ICE candidate", e);
+          }
         }
       };
 
-      pc.oniceconnectionstatechange = () => {
-        console.log("ICE state:", pc.iceConnectionState);
-        if (pc.iceConnectionState === "failed") {
-          console.warn("ICE failed — relay may be required.");
+      socket.onopen = async () => {
+        if (isCaller) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.send(JSON.stringify({ type: 'offer', offer }));
         }
       };
-    }
-
-    async function createOffer() {
-      createPeer();
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      sdpBox.value = JSON.stringify(offer);
-    }
-
-    async function createAnswer() {
-      createPeer();
-      const offer = JSON.parse(sdpBox.value);
-      if (pc.signalingState === "stable") {
-        console.warn("Already connected — can't set new offer.");
-        return;
-      }
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      sdpBox.value = JSON.stringify(answer);
-    }
-
-    async function setRemote() {
-      const desc = JSON.parse(sdpBox.value);
-      if (!pc) {
-        createPeer();
-      }
-      if (pc.signalingState !== "have-local-offer") {
-        console.warn("Cannot set remote answer in state:", pc.signalingState);
-        return;
-      }
-      await pc.setRemoteDescription(new RTCSessionDescription(desc));
     }
   </script>
 </body>
